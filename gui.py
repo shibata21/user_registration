@@ -219,16 +219,32 @@ def create_and_show():
         button_frame.pack(pady=10)
 
         def on_save():
+            import re
             last_name = last_name_entry.get().strip()
-            if not last_name:
-                messagebox.showwarning("警告", "氏を入力してください")
-                return
-            if not any(is_attending_var.get() for is_attending_var, _, _ in day_entries.values()):
-                messagebox.showwarning("警告", "来所日を1日以上選択してください")
-                return
             first_name = first_name_entry.get().strip()
             last_name_kana = last_name_kana_entry.get().strip()
             first_name_kana = first_name_kana_entry.get().strip()
+
+            if not last_name:
+                messagebox.showwarning("入力エラー", "氏を入力してください")
+                last_name_entry.focus_set()
+                return
+            if not last_name_kana:
+                messagebox.showwarning("入力エラー", "氏（カナ）を入力してください")
+                last_name_kana_entry.focus_set()
+                return
+            katakana_re = re.compile(r'^[ァ-ヶーヴ・\s]+$')
+            if not katakana_re.match(last_name_kana):
+                messagebox.showwarning("入力エラー", "氏（カナ）はカタカナで入力してください")
+                last_name_kana_entry.focus_set()
+                return
+            if first_name_kana and not katakana_re.match(first_name_kana):
+                messagebox.showwarning("入力エラー", "名（カナ）はカタカナで入力してください")
+                first_name_kana_entry.focus_set()
+                return
+            if not any(is_attending_var.get() for is_attending_var, _, _ in day_entries.values()):
+                messagebox.showwarning("入力エラー", "来所日を1日以上選択してください")
+                return
             gender = gender_var.get()
             is_long_term_absence = 1 if absence_var.get() else 0
             try:

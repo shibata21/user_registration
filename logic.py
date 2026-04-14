@@ -1,5 +1,19 @@
 import sqlite3
 import os
+import re
+
+_KATAKANA_RE = re.compile(r'^[ァ-ヶーヴ・\s]+$')
+
+def _validate_name(last_name, last_name_kana, first_name_kana):
+    if not (last_name or "").strip():
+        raise ValueError("氏は必須です")
+    if not (last_name_kana or "").strip():
+        raise ValueError("氏（カナ）は必須です")
+    if not _KATAKANA_RE.match(last_name_kana.strip()):
+        raise ValueError("氏（カナ）はカタカナで入力してください")
+    if first_name_kana and (first_name_kana or "").strip():
+        if not _KATAKANA_RE.match(first_name_kana.strip()):
+            raise ValueError("名（カナ）はカタカナで入力してください")
 
 # 性別マスタ
 GENDERS = {
@@ -105,8 +119,7 @@ def init_db():
 
 def add_user(last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence=0):
     """ユーザーを追加する"""
-    if not (last_name or "").strip():
-        raise ValueError("氏は必須です")
+    _validate_name(last_name, last_name_kana, first_name_kana)
     name = f"{last_name} {first_name}".strip()
     name_kana = f"{last_name_kana or ''}{first_name_kana or ''}".strip()
     conn = get_connection()
@@ -123,6 +136,7 @@ def add_user(last_name, first_name, last_name_kana, first_name_kana, gender, is_
 
 def update_user(user_id, last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence):
     """ユーザー情報を更新する"""
+    _validate_name(last_name, last_name_kana, first_name_kana)
     name = f"{last_name} {first_name}".strip()
     name_kana = f"{last_name_kana or ''}{first_name_kana or ''}".strip()
     conn = get_connection()
