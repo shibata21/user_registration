@@ -19,10 +19,12 @@ def create_and_show():
         # データベースからユーザーを取得して表示
         users = logic.get_users()
         for user in users:
-            user_id, name, name_kana, gender, is_long_term_absence = user
+            user_id, last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence = user
+            full_name = f"{last_name}　{first_name}".strip()
+            full_kana = f"{last_name_kana or ''}{first_name_kana or ''}".strip()
             gender_str = logic.GENDERS.get(gender, "不明")
             status = "長期休中" if is_long_term_absence else ""
-            user_tree.insert('', 'end', values=(user_id, name, name_kana, gender_str, status))
+            user_tree.insert('', 'end', values=(user_id, full_name, full_kana, gender_str, status))
 
     def on_add_user_clicked():
         """ユーザー追加ボタン"""
@@ -138,26 +140,38 @@ def create_and_show():
         # ── 基本情報 ──
         ctk.CTkLabel(scroll, text="基本情報", font=("", 13, "bold")).pack(anchor="w", pady=(0, 8))
 
-        ctk.CTkLabel(scroll, text="氏名:", font=("", 12)).pack(anchor="w")
-        name_entry = ctk.CTkEntry(scroll, width=390, font=("", 12))
-        name_entry.pack(anchor="w", pady=(0, 10))
+        name_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        name_frame.pack(anchor="w", fill="x", pady=(0, 10))
+        ctk.CTkLabel(name_frame, text="氏:", font=("", 12), width=60, anchor="w").grid(row=0, column=0)
+        last_name_entry = ctk.CTkEntry(name_frame, width=160, font=("", 12))
+        last_name_entry.grid(row=0, column=1, padx=(0, 15))
+        ctk.CTkLabel(name_frame, text="名:", font=("", 12), width=40, anchor="w").grid(row=0, column=2)
+        first_name_entry = ctk.CTkEntry(name_frame, width=160, font=("", 12))
+        first_name_entry.grid(row=0, column=3)
         if user:
-            name_entry.insert(0, user[1])
+            last_name_entry.insert(0, user[1])
+            first_name_entry.insert(0, user[2])
 
-        ctk.CTkLabel(scroll, text="氏名（カナ）:", font=("", 12)).pack(anchor="w")
-        name_kana_entry = ctk.CTkEntry(scroll, width=390, font=("", 12))
-        name_kana_entry.pack(anchor="w", pady=(0, 10))
+        kana_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        kana_frame.pack(anchor="w", fill="x", pady=(0, 10))
+        ctk.CTkLabel(kana_frame, text="氏（カナ）:", font=("", 12), width=60, anchor="w").grid(row=0, column=0)
+        last_name_kana_entry = ctk.CTkEntry(kana_frame, width=160, font=("", 12))
+        last_name_kana_entry.grid(row=0, column=1, padx=(0, 15))
+        ctk.CTkLabel(kana_frame, text="名（カナ）:", font=("", 12), width=40, anchor="w").grid(row=0, column=2)
+        first_name_kana_entry = ctk.CTkEntry(kana_frame, width=160, font=("", 12))
+        first_name_kana_entry.grid(row=0, column=3)
         if user:
-            name_kana_entry.insert(0, user[2] or "")
+            last_name_kana_entry.insert(0, user[3] or "")
+            first_name_kana_entry.insert(0, user[4] or "")
 
         ctk.CTkLabel(scroll, text="性別:", font=("", 12)).pack(anchor="w")
-        gender_var = tk.IntVar(value=user[3] if user else 1)
+        gender_var = tk.IntVar(value=user[5] if user else 1)
         gender_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         gender_frame.pack(anchor="w", pady=(0, 10))
         ctk.CTkRadioButton(gender_frame, text="男", variable=gender_var, value=1).pack(side="left", padx=(0, 10))
         ctk.CTkRadioButton(gender_frame, text="女", variable=gender_var, value=2).pack(side="left")
 
-        absence_var = tk.BooleanVar(value=bool(user[4]) if user else False)
+        absence_var = tk.BooleanVar(value=bool(user[6]) if user else False)
         ctk.CTkCheckBox(scroll, text="長期休中", variable=absence_var).pack(anchor="w", pady=(0, 15))
 
         # 区切り線
@@ -205,22 +219,24 @@ def create_and_show():
         button_frame.pack(pady=10)
 
         def on_save():
-            name = name_entry.get().strip()
-            if not name:
-                messagebox.showwarning("警告", "氏名を入力してください")
+            last_name = last_name_entry.get().strip()
+            if not last_name:
+                messagebox.showwarning("警告", "氏を入力してください")
                 return
             if not any(is_attending_var.get() for is_attending_var, _, _ in day_entries.values()):
                 messagebox.showwarning("警告", "来所日を1日以上選択してください")
                 return
-            name_kana = name_kana_entry.get().strip()
+            first_name = first_name_entry.get().strip()
+            last_name_kana = last_name_kana_entry.get().strip()
+            first_name_kana = first_name_kana_entry.get().strip()
             gender = gender_var.get()
             is_long_term_absence = 1 if absence_var.get() else 0
             try:
                 if user:
-                    logic.update_user(user[0], name, name_kana, gender, is_long_term_absence)
+                    logic.update_user(user[0], last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence)
                     target_user_id = user[0]
                 else:
-                    target_user_id = logic.add_user(name, name_kana, gender, is_long_term_absence)
+                    target_user_id = logic.add_user(last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence)
                 for day_idx, (is_attending_var, bath_var, memo_entry) in day_entries.items():
                     if is_attending_var.get():
                         bath_type = int(bath_var.get().split(':')[0])

@@ -80,34 +80,57 @@ def init_db():
     if 'bathing_memo' in cols and 'bath_memo' not in cols:
         cursor.execute('ALTER TABLE m_user_schedules RENAME COLUMN bathing_memo TO bath_memo')
 
+    # マイグレーション: name/name_kana → last_name/first_name/last_name_kana/first_name_kana 分割
+    cursor.execute("PRAGMA table_info(m_users)")
+    user_cols = [row[1] for row in cursor.fetchall()]
+    if 'last_name' not in user_cols:
+        cursor.execute("ALTER TABLE m_users ADD COLUMN last_name TEXT NOT NULL DEFAULT ''")
+        cursor.execute("ALTER TABLE m_users ADD COLUMN first_name TEXT NOT NULL DEFAULT ''")
+        cursor.execute("ALTER TABLE m_users ADD COLUMN last_name_kana TEXT")
+        cursor.execute("ALTER TABLE m_users ADD COLUMN first_name_kana TEXT")
+        cursor.execute("SELECT user_id, name, name_kana FROM m_users")
+        for user_id, name, name_kana in cursor.fetchall():
+            parts = (name or '').split(' ', 1)
+            ln = parts[0].strip()
+            fn = parts[1].strip() if len(parts) > 1 else ''
+            cursor.execute(
+                "UPDATE m_users SET last_name=?, first_name=?, last_name_kana=?, first_name_kana='' WHERE user_id=?",
+                (ln, fn, name_kana or '', user_id)
+            )
+
     conn.commit()
     conn.close()
 
 
 
-def add_user(name, name_kana, gender, is_long_term_absence=0):
+def add_user(last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence=0):
     """ユーザーを追加する"""
+    name = f"{last_name} {first_name}".strip()
+    name_kana = f"{last_name_kana or ''}{first_name_kana or ''}".strip()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-    INSERT INTO m_users (name, name_kana, gender, is_long_term_absence)
-    VALUES (?, ?, ?, ?)
-    ''', (name, name_kana, gender, is_long_term_absence))
+    INSERT INTO m_users (name, name_kana, last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (name, name_kana, last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence))
     conn.commit()
     user_id = cursor.lastrowid
     conn.close()
     return user_id
 
 
-def update_user(user_id, name, name_kana, gender, is_long_term_absence):
+def update_user(user_id, last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence):
     """ユーザー情報を更新する"""
+    name = f"{last_name} {first_name}".strip()
+    name_kana = f"{last_name_kana or ''}{first_name_kana or ''}".strip()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
     UPDATE m_users
-    SET name = ?, name_kana = ?, gender = ?, is_long_term_absence = ?
+    SET name = ?, name_kana = ?, last_name = ?, first_name = ?, last_name_kana = ?, first_name_kana = ?,
+        gender = ?, is_long_term_absence = ?
     WHERE user_id = ?
-    ''', (name, name_kana, gender, is_long_term_absence, user_id))
+    ''', (name, name_kana, last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence, user_id))
     conn.commit()
     conn.close()
 
@@ -127,8 +150,8 @@ def get_users():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-    SELECT user_id, name, name_kana, gender, is_long_term_absence
-    FROM m_users ORDER BY gender, name_kana
+    SELECT user_id, last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence
+    FROM m_users ORDER BY gender, last_name_kana, first_name_kana
     ''')
     rows = cursor.fetchall()
     conn.close()
@@ -140,7 +163,7 @@ def get_user_by_id(user_id):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-    SELECT user_id, name, name_kana, gender, is_long_term_absence
+    SELECT user_id, last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence
     FROM m_users WHERE user_id = ?
     ''', (user_id,))
     row = cursor.fetchone()
