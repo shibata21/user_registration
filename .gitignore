@@ -1,0 +1,13 @@
+# 環境依存ファイル
+config.json
+*.db
+
+# 開発用一時ファイル
+test_imports.py
+IMPLEMENTATION.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
