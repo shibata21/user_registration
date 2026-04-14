@@ -105,6 +105,8 @@ def init_db():
 
 def add_user(last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence=0):
     """ユーザーを追加する"""
+    if not (last_name or "").strip():
+        raise ValueError("氏は必須です")
     name = f"{last_name} {first_name}".strip()
     name_kana = f"{last_name_kana or ''}{first_name_kana or ''}".strip()
     conn = get_connection()
