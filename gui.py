@@ -141,10 +141,98 @@ def create_and_show():
         if messagebox.askyesno("終了確認", "アプリケーションを終了しますか？"):
             app.destroy()
 
+    def _open_temp_schedule_editor(user_id, parent, on_saved=None):
+        """臨時スケジュール編集サブダイアログ（共通）"""
+        sub = ctk.CTkToplevel(parent)
+        sub.geometry("500x520")
+        sub.title("臨時スケジュール設定")
+        sub.transient(parent)
+        sub.grab_set()
+
+        s_scroll = ctk.CTkScrollableFrame(sub)
+        s_scroll.pack(fill="both", expand=True, padx=15, pady=(12, 5))
+
+        ctk.CTkLabel(s_scroll, text="適用期間", font=("", 12, "bold")).pack(anchor="w", pady=(0, 6))
+        date_frame = ctk.CTkFrame(s_scroll, fg_color="transparent")
+        date_frame.pack(anchor="w", fill="x", pady=(0, 10))
+
+        existing = logic.get_temp_schedule(user_id)
+
+        today = datetime.date.today()
+        init_start = datetime.date.fromisoformat(existing['start_date']) if existing else today
+        init_end = (datetime.date.fromisoformat(existing['end_date'])
+                    if existing and existing['end_date'] else today)
+
+        ctk.CTkLabel(date_frame, text="開始日:", width=55, anchor="w").grid(row=0, column=0)
+        start_picker = DateEntry(date_frame, width=13, date_pattern="yyyy-mm-dd",
+                                 year=init_start.year, month=init_start.month, day=init_start.day)
+        start_picker.grid(row=0, column=1, padx=(0, 10))
+
+        ctk.CTkLabel(date_frame, text="終了日:", width=55, anchor="w").grid(row=1, column=0, pady=(6, 0))
+        end_use_var = tk.BooleanVar(value=bool(existing and existing['end_date']))
+        end_chk = ctk.CTkCheckBox(date_frame, text="指定する", variable=end_use_var, width=80, font=("", 11))
+        end_chk.grid(row=1, column=1, sticky="w", pady=(6, 0))
+        end_picker = DateEntry(date_frame, width=13, date_pattern="yyyy-mm-dd",
+                               year=init_end.year, month=init_end.month, day=init_end.day)
+        end_picker.grid(row=1, column=2, padx=(6, 0), pady=(6, 0))
+
+        def _toggle_end_picker(*_):
+            end_picker.configure(state="normal" if end_use_var.get() else "disabled")
+        end_use_var.trace_add("write", _toggle_end_picker)
+        _toggle_end_picker()
+
+        ctk.CTkLabel(s_scroll, text="曜日・入浴区分", font=("", 12, "bold")).pack(anchor="w", pady=(0, 6))
+
+        existing_days = {d['day_of_week']: d for d in existing['days']} if existing else {}
+        sub_day_entries = {}
+        for day_idx in range(7):
+            day_name = logic.WEEKDAY_NAMES[day_idx]
+            ex = existing_days.get(day_idx)
+            df = ctk.CTkFrame(s_scroll, fg_color="transparent")
+            df.pack(fill="x", pady=3)
+            chk_var = tk.BooleanVar(value=ex is not None)
+            ctk.CTkCheckBox(df, text=f"{day_name}曜日", variable=chk_var,
+                            width=90, font=("", 11)).pack(side="left", padx=(0, 8))
+            b_var = tk.StringVar()
+            b_combo = ttk.Combobox(df, textvariable=b_var, width=20, state="readonly", font=("", 11))
+            b_combo['values'] = [f"{k}: {v}" for k, v in logic.BATH_TYPES.items()]
+            b_combo.set(f"{ex['bath_type']}: {logic.BATH_TYPES[ex['bath_type']]}" if ex else "0: 風呂なし")
+            b_combo.pack(side="left", padx=(0, 8))
+            m_entry = ctk.CTkEntry(df, placeholder_text="メモ", width=90, font=("", 11))
+            if ex and ex['bath_memo']:
+                m_entry.insert(0, ex['bath_memo'])
+            m_entry.pack(side="left", padx=(0, 8))
+            abs_var = tk.BooleanVar(value=bool(ex.get('is_absence', 0)) if ex else False)
+            ctk.CTkCheckBox(df, text="休み", variable=abs_var,
+                            width=60, font=("", 11)).pack(side="left")
+            sub_day_entries[day_idx] = (chk_var, b_var, m_entry, abs_var)
+
+        def on_sub_save():
+            start = start_picker.get_date().strftime("%Y-%m-%d")
+            end = end_picker.get_date().strftime("%Y-%m-%d") if end_use_var.get() else None
+            days = []
+            for di, (cv, bv, me, av) in sub_day_entries.items():
+                if cv.get():
+                    days.append((di, int(bv.get().split(':')[0]), me.get().strip(), 1 if av.get() else 0))
+            try:
+                logic.set_temp_schedule(user_id, start, end, days)
+                refresh_user_list(search_var.get())
+                if on_saved:
+                    on_saved()
+                sub.destroy()
+            except Exception as e:
+                messagebox.showerror("エラー", str(e), parent=sub)
+
+        btn_f = ctk.CTkFrame(sub, fg_color="transparent")
+        btn_f.pack(pady=8)
+        ctk.CTkButton(btn_f, text="保存", width=100, command=on_sub_save).pack(side="left", padx=5)
+        ctk.CTkButton(btn_f, text="キャンセル", width=100, command=sub.destroy,
+                      fg_color="#888888", hover_color="#666666").pack(side="left", padx=5)
+
     def open_temp_list_dialog():
         """臨時スケジュール一覧ダイアログ"""
         dialog = ctk.CTkToplevel(app)
-        dialog.geometry("680x400")
+        dialog.geometry("680x430")
         dialog.title("臨時スケジュール一覧")
         dialog.transient(app)
         dialog.grab_set()
@@ -167,9 +255,12 @@ def create_and_show():
         tree.pack(fill="both", expand=True)
         tree.configure(yscrollcommand=sb.set)
 
+        item_user_map = {}  # treeview item id -> user_id
+
         def _load():
             for item in tree.get_children():
                 tree.delete(item)
+            item_user_map.clear()
             records = logic.get_all_active_temp_schedules()
             for r in records:
                 name = f"{r['last_name']}　{r['first_name']}".strip()
@@ -178,10 +269,27 @@ def create_and_show():
                     logic.WEEKDAY_NAMES[d['day_of_week']] + "曜" + ("(休)" if d.get('is_absence') else "")
                     for d in r['days']
                 )
-                tree.insert("", "end", values=(name, period, days_str))
+                iid = tree.insert("", "end", values=(name, period, days_str))
+                item_user_map[iid] = r['user_id']
+
+        def _on_edit():
+            selected = tree.selection()
+            if not selected:
+                messagebox.showwarning("警告", "編集する利用者を選択してください", parent=dialog)
+                return
+            user_id = item_user_map[selected[0]]
+            _open_temp_schedule_editor(user_id, dialog, on_saved=_load)
 
         _load()
-        ctk.CTkButton(dialog, text="閉じる", width=100, command=dialog.destroy).pack(pady=(0, 12))
+
+        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_frame.pack(pady=(0, 12))
+        ctk.CTkButton(btn_frame, text="編集", width=100, command=_on_edit).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="閉じる", width=100,
+                      fg_color="#888888", hover_color="#666666",
+                      command=dialog.destroy).pack(side="left", padx=5)
+
+        tree.bind("<Double-1>", lambda _: _on_edit())
 
     def open_user_edit_dialog(user):
         """ユーザー編集ダイアログを開く（スケジュール設定を含む）"""
@@ -301,91 +409,7 @@ def create_and_show():
         temp_btn_frame.pack(anchor="w", pady=(0, 10))
 
         def open_temp_edit():
-            """臨時スケジュール設定サブダイアログ"""
-            sub = ctk.CTkToplevel(dialog)
-            sub.geometry("500x520")
-            sub.title("臨時スケジュール設定")
-            sub.transient(dialog)
-            sub.grab_set()
-
-            s_scroll = ctk.CTkScrollableFrame(sub)
-            s_scroll.pack(fill="both", expand=True, padx=15, pady=(12, 5))
-
-            ctk.CTkLabel(s_scroll, text="適用期間", font=("", 12, "bold")).pack(anchor="w", pady=(0, 6))
-            date_frame = ctk.CTkFrame(s_scroll, fg_color="transparent")
-            date_frame.pack(anchor="w", fill="x", pady=(0, 10))
-
-            existing = logic.get_temp_schedule(user[0]) if user else None
-
-            today = datetime.date.today()
-            init_start = datetime.date.fromisoformat(existing['start_date']) if existing else today
-            init_end = (datetime.date.fromisoformat(existing['end_date'])
-                        if existing and existing['end_date'] else today)
-
-            ctk.CTkLabel(date_frame, text="開始日:", width=55, anchor="w").grid(row=0, column=0)
-            start_picker = DateEntry(date_frame, width=13, date_pattern="yyyy-mm-dd",
-                                     year=init_start.year, month=init_start.month, day=init_start.day)
-            start_picker.grid(row=0, column=1, padx=(0, 10))
-
-            ctk.CTkLabel(date_frame, text="終了日:", width=55, anchor="w").grid(row=1, column=0, pady=(6, 0))
-            end_use_var = tk.BooleanVar(value=bool(existing and existing['end_date']))
-            end_chk = ctk.CTkCheckBox(date_frame, text="指定する", variable=end_use_var, width=80, font=("", 11))
-            end_chk.grid(row=1, column=1, sticky="w", pady=(6, 0))
-            end_picker = DateEntry(date_frame, width=13, date_pattern="yyyy-mm-dd",
-                                   year=init_end.year, month=init_end.month, day=init_end.day)
-            end_picker.grid(row=1, column=2, padx=(6, 0), pady=(6, 0))
-
-            def _toggle_end_picker(*_):
-                end_picker.configure(state="normal" if end_use_var.get() else "disabled")
-            end_use_var.trace_add("write", _toggle_end_picker)
-            _toggle_end_picker()
-
-            ctk.CTkLabel(s_scroll, text="曜日・入浴区分", font=("", 12, "bold")).pack(anchor="w", pady=(0, 6))
-
-            existing_days = {d['day_of_week']: d for d in existing['days']} if existing else {}
-            sub_day_entries = {}
-            for day_idx in range(7):
-                day_name = logic.WEEKDAY_NAMES[day_idx]
-                ex = existing_days.get(day_idx)
-                df = ctk.CTkFrame(s_scroll, fg_color="transparent")
-                df.pack(fill="x", pady=3)
-                chk_var = tk.BooleanVar(value=ex is not None)
-                ctk.CTkCheckBox(df, text=f"{day_name}曜日", variable=chk_var,
-                                width=90, font=("", 11)).pack(side="left", padx=(0, 8))
-                b_var = tk.StringVar()
-                b_combo = ttk.Combobox(df, textvariable=b_var, width=20, state="readonly", font=("", 11))
-                b_combo['values'] = [f"{k}: {v}" for k, v in logic.BATH_TYPES.items()]
-                b_combo.set(f"{ex['bath_type']}: {logic.BATH_TYPES[ex['bath_type']]}" if ex else "0: 風呂なし")
-                b_combo.pack(side="left", padx=(0, 8))
-                m_entry = ctk.CTkEntry(df, placeholder_text="メモ", width=90, font=("", 11))
-                if ex and ex['bath_memo']:
-                    m_entry.insert(0, ex['bath_memo'])
-                m_entry.pack(side="left", padx=(0, 8))
-                abs_var = tk.BooleanVar(value=bool(ex.get('is_absence', 0)) if ex else False)
-                ctk.CTkCheckBox(df, text="休み", variable=abs_var,
-                                width=60, font=("", 11)).pack(side="left")
-                sub_day_entries[day_idx] = (chk_var, b_var, m_entry, abs_var)
-
-            def on_sub_save():
-                start = start_picker.get_date().strftime("%Y-%m-%d")
-                end = end_picker.get_date().strftime("%Y-%m-%d") if end_use_var.get() else None
-                days = []
-                for di, (cv, bv, me, av) in sub_day_entries.items():
-                    if cv.get():
-                        days.append((di, int(bv.get().split(':')[0]), me.get().strip(), 1 if av.get() else 0))
-                try:
-                    logic.set_temp_schedule(user[0], start, end, days)
-                    _refresh_temp_info()
-                    refresh_user_list(search_var.get())
-                    sub.destroy()
-                except Exception as e:
-                    messagebox.showerror("エラー", str(e), parent=sub)
-
-            btn_f = ctk.CTkFrame(sub, fg_color="transparent")
-            btn_f.pack(pady=8)
-            ctk.CTkButton(btn_f, text="保存", width=100, command=on_sub_save).pack(side="left", padx=5)
-            ctk.CTkButton(btn_f, text="キャンセル", width=100, command=sub.destroy,
-                          fg_color="#888888", hover_color="#666666").pack(side="left", padx=5)
+            _open_temp_schedule_editor(user[0], dialog, on_saved=_refresh_temp_info)
 
         def on_temp_delete():
             if user and messagebox.askyesno("確認", "臨時スケジュールを解除しますか？"):
