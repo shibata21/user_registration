@@ -5,6 +5,7 @@ config.json
 # 開発用一時ファイル
 test_imports.py
 IMPLEMENTATION.md
+seed_data.py
 
 # Python
 __pycache__/

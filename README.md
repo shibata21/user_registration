@@ -79,7 +79,7 @@ user_registration/
 
 ### 必要なライブラリ
 ```bash
-pip install customtkinter
+pip install customtkinter tkcalendar
 ```
 
 ### 実行

@@ -185,10 +185,9 @@ def update_user(user_id, last_name, first_name, last_name_kana, first_name_kana,
 
 
 def delete_user(user_id):
-    """ユーザーを削除する（関連するスケジュールも削除）"""
+    """ユーザーを削除する（ON DELETE CASCADE により関連レコードも自動削除）"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM m_user_schedules WHERE user_id = ?', (user_id,))
     cursor.execute('DELETE FROM m_users WHERE user_id = ?', (user_id,))
     conn.commit()
     conn.close()

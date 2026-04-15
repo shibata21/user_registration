@@ -1,9 +1,11 @@
 import os
+import datetime
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk
 import tkinter.filedialog as filedialog
 import tkinter.messagebox as messagebox
+from tkcalendar import DateEntry
 import logic
 import config
 
@@ -275,7 +277,7 @@ def create_and_show():
         ctk.CTkFrame(scroll, height=2, fg_color="gray50").pack(fill="x", pady=(8, 12))
         ctk.CTkLabel(scroll, text="臨時スケジュール", font=("", 13, "bold")).pack(anchor="w", pady=(0, 4))
 
-        temp_info_label = ctk.CTkLabel(scroll, text="", font=("", 11), text_color="gray", anchor="w")
+        temp_info_label = ctk.CTkLabel(scroll, text="", font=("", 13), text_color="gray", anchor="w")
         temp_info_label.pack(anchor="w", pady=(0, 6))
 
         def _refresh_temp_info():
@@ -291,7 +293,7 @@ def create_and_show():
                     logic.WEEKDAY_NAMES[d['day_of_week']] + "曜" + ("(休)" if d.get('is_absence') else "")
                     for d in ts['days']
                 )
-                temp_info_label.configure(text=f"{period}　/ {days_str}", text_color="orange")
+                temp_info_label.configure(text=f"{period}　/ {days_str}", text_color="#29B6F6")
 
         _refresh_temp_info()
 
@@ -312,18 +314,31 @@ def create_and_show():
             ctk.CTkLabel(s_scroll, text="適用期間", font=("", 12, "bold")).pack(anchor="w", pady=(0, 6))
             date_frame = ctk.CTkFrame(s_scroll, fg_color="transparent")
             date_frame.pack(anchor="w", fill="x", pady=(0, 10))
-            ctk.CTkLabel(date_frame, text="開始日:", width=55, anchor="w").grid(row=0, column=0)
-            start_entry = ctk.CTkEntry(date_frame, width=130, placeholder_text="YYYY-MM-DD")
-            start_entry.grid(row=0, column=1, padx=(0, 10))
-            ctk.CTkLabel(date_frame, text="終了日:", width=55, anchor="w").grid(row=0, column=2)
-            end_entry = ctk.CTkEntry(date_frame, width=130, placeholder_text="省略可（1日のみ）")
-            end_entry.grid(row=0, column=3)
 
             existing = logic.get_temp_schedule(user[0]) if user else None
-            if existing:
-                start_entry.insert(0, existing['start_date'])
-                if existing['end_date']:
-                    end_entry.insert(0, existing['end_date'])
+
+            today = datetime.date.today()
+            init_start = datetime.date.fromisoformat(existing['start_date']) if existing else today
+            init_end = (datetime.date.fromisoformat(existing['end_date'])
+                        if existing and existing['end_date'] else today)
+
+            ctk.CTkLabel(date_frame, text="開始日:", width=55, anchor="w").grid(row=0, column=0)
+            start_picker = DateEntry(date_frame, width=13, date_pattern="yyyy-mm-dd",
+                                     year=init_start.year, month=init_start.month, day=init_start.day)
+            start_picker.grid(row=0, column=1, padx=(0, 10))
+
+            ctk.CTkLabel(date_frame, text="終了日:", width=55, anchor="w").grid(row=1, column=0, pady=(6, 0))
+            end_use_var = tk.BooleanVar(value=bool(existing and existing['end_date']))
+            end_chk = ctk.CTkCheckBox(date_frame, text="指定する", variable=end_use_var, width=80, font=("", 11))
+            end_chk.grid(row=1, column=1, sticky="w", pady=(6, 0))
+            end_picker = DateEntry(date_frame, width=13, date_pattern="yyyy-mm-dd",
+                                   year=init_end.year, month=init_end.month, day=init_end.day)
+            end_picker.grid(row=1, column=2, padx=(6, 0), pady=(6, 0))
+
+            def _toggle_end_picker(*_):
+                end_picker.configure(state="normal" if end_use_var.get() else "disabled")
+            end_use_var.trace_add("write", _toggle_end_picker)
+            _toggle_end_picker()
 
             ctk.CTkLabel(s_scroll, text="曜日・入浴区分", font=("", 12, "bold")).pack(anchor="w", pady=(0, 6))
 
@@ -352,8 +367,8 @@ def create_and_show():
                 sub_day_entries[day_idx] = (chk_var, b_var, m_entry, abs_var)
 
             def on_sub_save():
-                start = start_entry.get().strip()
-                end = end_entry.get().strip() or None
+                start = start_picker.get_date().strftime("%Y-%m-%d")
+                end = end_picker.get_date().strftime("%Y-%m-%d") if end_use_var.get() else None
                 days = []
                 for di, (cv, bv, me, av) in sub_day_entries.items():
                     if cv.get():
