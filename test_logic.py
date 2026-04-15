@@ -564,5 +564,93 @@ class TestGetScheduleForDay(unittest.TestCase):
         self.assertEqual(len(logic.get_schedule_for_day(0)), 5)
 
 
+class TestTempSchedule(unittest.TestCase):
+
+    def setUp(self):
+        self._fd, self._path = tempfile.mkstemp(suffix=".db")
+        os.close(self._fd)
+        logic.set_db_path(self._path)
+        logic.init_db()
+        self._uid = logic.add_user("臨時テスト", "", "リンジテスト", "", 1)
+
+    def tearDown(self):
+        logic.set_db_path(None)
+        os.unlink(self._path)
+
+    # ── 正常系 ──────────────────────────────────────────────
+
+    def test_set_and_get(self):
+        logic.set_temp_schedule(self._uid, "2099-04-01", "2099-04-07",
+                                [(0, 2, ""), (2, 1, "メモ")])
+        ts = logic.get_temp_schedule(self._uid)
+        self.assertIsNotNone(ts)
+        self.assertEqual(ts['start_date'], "2099-04-01")
+        self.assertEqual(ts['end_date'],   "2099-04-07")
+        self.assertEqual(len(ts['days']), 2)
+
+    def test_single_day_end_date_none(self):
+        """終了日なし → 1日のみ適用"""
+        logic.set_temp_schedule(self._uid, "2099-06-01", None, [(0, 2, "")])
+        ts = logic.get_temp_schedule(self._uid)
+        self.assertIsNone(ts['end_date'])
+
+    def test_replace_existing(self):
+        """上書き登録で古い設定が消えること"""
+        logic.set_temp_schedule(self._uid, "2099-04-01", "2099-04-07", [(0, 2, "")])
+        logic.set_temp_schedule(self._uid, "2099-05-01", "2099-05-03", [(1, 1, "")])
+        ts = logic.get_temp_schedule(self._uid)
+        self.assertEqual(ts['start_date'], "2099-05-01")
+        self.assertEqual(len(ts['days']), 1)
+        self.assertEqual(ts['days'][0]['day_of_week'], 1)
+
+    def test_delete(self):
+        logic.set_temp_schedule(self._uid, "2099-04-01", None, [(0, 2, "")])
+        logic.delete_temp_schedule(self._uid)
+        self.assertIsNone(logic.get_temp_schedule(self._uid))
+
+    def test_delete_nonexistent_no_error(self):
+        logic.delete_temp_schedule(9999)
+
+    def test_get_all_active(self):
+        uid2 = logic.add_user("別ユーザー", "", "ベツユーザー", "", 2)
+        logic.set_temp_schedule(self._uid, "2099-04-01", "2099-04-07", [(0, 2, "")])
+        logic.set_temp_schedule(uid2,      "2099-05-01", None,         [(3, 1, "")])
+        result = logic.get_all_active_temp_schedules()
+        self.assertEqual(len(result), 2)
+
+    def test_get_active_user_ids_empty(self):
+        """今日有効な臨時スケジュールがない場合"""
+        ids = logic.get_active_temp_schedule_user_ids()
+        self.assertEqual(ids, set())
+
+    def test_user_deleted_cascades_temp(self):
+        """ユーザー削除で臨時スケジュールも消えること"""
+        logic.set_temp_schedule(self._uid, "2099-04-01", None, [(0, 2, "")])
+        logic.delete_user(self._uid)
+        logic.set_db_path(self._path)
+        # DBに残っていないことをSQLで直接確認
+        import sqlite3
+        conn = sqlite3.connect(self._path)
+        row = conn.execute(
+            "SELECT COUNT(*) FROM m_user_temp_schedules WHERE user_id=?", (self._uid,)
+        ).fetchone()
+        conn.close()
+        self.assertEqual(row[0], 0)
+
+    # ── 異常系 ──────────────────────────────────────────────
+
+    def test_invalid_date_format_raises(self):
+        with self.assertRaises(ValueError):
+            logic.set_temp_schedule(self._uid, "2099/04/01", None, [(0, 2, "")])
+
+    def test_end_before_start_raises(self):
+        with self.assertRaises(ValueError):
+            logic.set_temp_schedule(self._uid, "2099-04-10", "2099-04-01", [(0, 2, "")])
+
+    def test_no_days_raises(self):
+        with self.assertRaises(ValueError):
+            logic.set_temp_schedule(self._uid, "2099-04-01", None, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

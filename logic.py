@@ -112,9 +112,33 @@ def init_db():
                 (ln, fn, name_kana or '', user_id)
             )
 
+    # 臨時スケジュール ヘッダーテーブル (1ユーザー1件)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS m_user_temp_schedules (
+        temp_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id   INTEGER NOT NULL UNIQUE,
+        start_date TEXT NOT NULL,
+        end_date   TEXT,
+        FOREIGN KEY (user_id) REFERENCES m_users(user_id) ON DELETE CASCADE
+    )
+    ''')
+
+    # 臨時スケジュール 曜日明細テーブル
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS m_user_temp_schedule_days (
+        day_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+        temp_id    INTEGER NOT NULL,
+        day_of_week INTEGER NOT NULL CHECK(day_of_week BETWEEN 0 AND 6),
+        bath_type  INTEGER NOT NULL DEFAULT 0,
+        bath_memo  TEXT DEFAULT '',
+        UNIQUE(temp_id, day_of_week),
+        FOREIGN KEY (temp_id) REFERENCES m_user_temp_schedules(temp_id) ON DELETE CASCADE
+    )
+    ''')
+
     conn.commit()
     conn.close()
-
+    cleanup_expired_temp_schedules()
 
 
 def add_user(last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence=0):
@@ -291,3 +315,146 @@ def get_schedule_for_day(day_of_week):
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+# ─────────────────────────────────────────────
+# 臨時スケジュール
+# ─────────────────────────────────────────────
+
+def cleanup_expired_temp_schedules():
+    """期限切れの臨時スケジュールを削除する（起動時に自動呼び出し）"""
+    import datetime
+    if DB_PATH is None:
+        return
+    today = datetime.date.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+    DELETE FROM m_user_temp_schedules
+    WHERE (end_date IS NOT NULL AND end_date < ?)
+       OR (end_date IS NULL AND start_date < ?)
+    ''', (today, today))
+    conn.commit()
+    conn.close()
+
+
+def set_temp_schedule(user_id, start_date, end_date, days):
+    """臨時スケジュールを設定（既存は置き換え）
+    days: [(day_of_week, bath_type, bath_memo), ...]
+    end_date: None または 'YYYY-MM-DD'（Noneなら start_date のみ）
+    """
+    import datetime
+    try:
+        datetime.date.fromisoformat(start_date)
+        if end_date:
+            datetime.date.fromisoformat(end_date)
+    except ValueError:
+        raise ValueError("日付は YYYY-MM-DD 形式で入力してください")
+    if end_date and end_date < start_date:
+        raise ValueError("終了日は開始日以降にしてください")
+    if not days:
+        raise ValueError("曜日を1日以上選択してください")
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM m_user_temp_schedules WHERE user_id = ?', (user_id,))
+    cursor.execute('''
+    INSERT INTO m_user_temp_schedules (user_id, start_date, end_date)
+    VALUES (?, ?, ?)
+    ''', (user_id, start_date, end_date or None))
+    temp_id = cursor.lastrowid
+    for day_of_week, bath_type, bath_memo in days:
+        cursor.execute('''
+        INSERT INTO m_user_temp_schedule_days (temp_id, day_of_week, bath_type, bath_memo)
+        VALUES (?, ?, ?, ?)
+        ''', (temp_id, day_of_week, bath_type, bath_memo or ''))
+    conn.commit()
+    conn.close()
+
+
+def get_temp_schedule(user_id):
+    """ユーザーの臨時スケジュールを取得する（なければ None）
+    戻り値: {'temp_id', 'user_id', 'start_date', 'end_date',
+              'days': [{'day_of_week', 'bath_type', 'bath_memo'}, ...]}
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+    SELECT temp_id, user_id, start_date, end_date
+    FROM m_user_temp_schedules WHERE user_id = ?
+    ''', (user_id,))
+    header = cursor.fetchone()
+    if header is None:
+        conn.close()
+        return None
+    temp_id = header[0]
+    cursor.execute('''
+    SELECT day_of_week, bath_type, bath_memo
+    FROM m_user_temp_schedule_days WHERE temp_id = ?
+    ORDER BY day_of_week
+    ''', (temp_id,))
+    days = [{'day_of_week': d[0], 'bath_type': d[1], 'bath_memo': d[2]}
+            for d in cursor.fetchall()]
+    conn.close()
+    return {'temp_id': header[0], 'user_id': header[1],
+            'start_date': header[2], 'end_date': header[3], 'days': days}
+
+
+def delete_temp_schedule(user_id):
+    """臨時スケジュールを削除する"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM m_user_temp_schedules WHERE user_id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_all_active_temp_schedules():
+    """有効期間内（今日以降）の臨時スケジュール一覧を返す（ユーザー情報付き）"""
+    import datetime
+    today = datetime.date.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+    SELECT t.temp_id, t.user_id, u.last_name, u.first_name, u.gender,
+           t.start_date, t.end_date
+    FROM m_user_temp_schedules t
+    JOIN m_users u ON u.user_id = t.user_id
+    WHERE (t.end_date IS NULL     AND t.start_date >= ?)
+       OR (t.end_date IS NOT NULL AND t.end_date   >= ?)
+    ORDER BY t.start_date, u.last_name_kana
+    ''', (today, today))
+    rows = cursor.fetchall()
+    result = []
+    for row in rows:
+        temp_id = row[0]
+        cursor.execute('''
+        SELECT day_of_week FROM m_user_temp_schedule_days
+        WHERE temp_id = ? ORDER BY day_of_week
+        ''', (temp_id,))
+        days = [d[0] for d in cursor.fetchall()]
+        result.append({'temp_id': row[0], 'user_id': row[1],
+                       'last_name': row[2], 'first_name': row[3],
+                       'gender': row[4], 'start_date': row[5],
+                       'end_date': row[6], 'days': days})
+    conn.close()
+    return result
+
+
+def get_active_temp_schedule_user_ids():
+    """今日が適用期間内の臨時スケジュールを持つユーザーID集合を返す"""
+    import datetime
+    today = datetime.date.today().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+    SELECT user_id FROM m_user_temp_schedules
+    WHERE start_date <= ?
+      AND (
+          (end_date IS NOT NULL AND end_date >= ?)
+          OR (end_date IS NULL AND start_date = ?)
+      )
+    ''', (today, today, today))
+    ids = {row[0] for row in cursor.fetchall()}
+    conn.close()
+    return ids
