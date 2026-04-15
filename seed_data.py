@@ -10,7 +10,7 @@ logic.init_db()
 
 # （last_name, first_name, last_name_kana, first_name_kana, gender, [(day_of_week, bath_type, bath_memo), ...], is_long_term_absence）
 # gender: 1=男 2=女
-# bath_type: 0=入浴なし 1=機械浴 2=一般浴(手引き) 3=シャワーキャリー
+# bath_type: 0=入浴なし 1=チェア浴 2=一般浴(手引き) 3=シャワーキャリー
 # day_of_week: 0=月 1=火 2=水 3=木 4=金 5=土 6=日
 users_data = [
     # ── 男性 ───────────────────────────────────────────────
