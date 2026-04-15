@@ -165,6 +165,58 @@ class TestAddUser(unittest.TestCase):
         uid = logic.add_user("アンドレ", "", "アンドレ・スミス", "", 1)
         self.assertGreater(uid, 0)
 
+    def test_katakana_with_space_allowed(self):
+        """スペースを含むカナは有効（regex に \s を含む）"""
+        uid = logic.add_user("山田", "", "ヤマ ダ", "", 1)
+        self.assertGreater(uid, 0)
+
+    # ── 異常系（追加エッジケース） ────────────────────────────
+
+    def test_whitespace_only_last_name_raises(self):
+        """空白のみの氏はエラー"""
+        with self.assertRaises(ValueError):
+            logic.add_user("   ", "", "テスト", "", 1)
+
+    def test_whitespace_only_last_name_kana_raises(self):
+        """空白のみの氏カナはエラー"""
+        with self.assertRaises(ValueError):
+            logic.add_user("田中", "", "   ", "", 1)
+
+    def test_none_last_name_raises(self):
+        """None の氏はエラー"""
+        with self.assertRaises(ValueError):
+            logic.add_user(None, "", "テスト", "", 1)
+
+    def test_none_last_name_kana_raises(self):
+        """None の氏カナはエラー"""
+        with self.assertRaises(ValueError):
+            logic.add_user("田中", "", None, "", 1)
+
+    def test_roman_alphabet_in_last_name_kana_raises(self):
+        """氏カナにローマ字が入るとエラー"""
+        with self.assertRaises(ValueError):
+            logic.add_user("Smith", "", "Smith", "", 1)
+
+    def test_numbers_in_last_name_kana_raises(self):
+        """氏カナに数字が入るとエラー"""
+        with self.assertRaises(ValueError):
+            logic.add_user("田中", "", "タナカ123", "", 1)
+
+    def test_mixed_katakana_hiragana_in_kana_raises(self):
+        """氏カナにひらがなが混じるとエラー"""
+        with self.assertRaises(ValueError):
+            logic.add_user("田中", "", "タなカ", "", 1)
+
+    def test_roman_alphabet_in_first_name_kana_raises(self):
+        """名カナにローマ字が入るとエラー"""
+        with self.assertRaises(ValueError):
+            logic.add_user("田中", "太郎", "タナカ", "Taro", 1)
+
+    def test_whitespace_only_first_name_kana_is_ok(self):
+        """名カナが空白のみは空扱いでOK"""
+        uid = logic.add_user("田中", "", "タナカ", "   ", 1)
+        self.assertGreater(uid, 0)
+
 
 class TestFindUsersByName(unittest.TestCase):
 
@@ -289,6 +341,22 @@ class TestUpdateUser(unittest.TestCase):
     def test_update_non_katakana_raises(self):
         with self.assertRaises(ValueError):
             logic.update_user(self._uid, "姓", "", "せい", "", 1, 0)
+
+    def test_update_whitespace_only_last_name_raises(self):
+        with self.assertRaises(ValueError):
+            logic.update_user(self._uid, "   ", "", "テスト", "", 1, 0)
+
+    def test_update_whitespace_only_kana_raises(self):
+        with self.assertRaises(ValueError):
+            logic.update_user(self._uid, "姓", "", "   ", "", 1, 0)
+
+    def test_update_none_last_name_raises(self):
+        with self.assertRaises(ValueError):
+            logic.update_user(self._uid, None, "", "テスト", "", 1, 0)
+
+    def test_update_roman_in_kana_raises(self):
+        with self.assertRaises(ValueError):
+            logic.update_user(self._uid, "姓", "", "Smith", "", 1, 0)
 
 
 class TestDeleteUser(unittest.TestCase):
@@ -665,6 +733,58 @@ class TestTempSchedule(unittest.TestCase):
         logic.set_temp_schedule(self._uid, "2099-04-01", None, [(0, 2, "")])
         ts = logic.get_temp_schedule(self._uid)
         self.assertEqual(ts['days'][0]['is_absence'], 0)
+
+    def test_end_date_same_as_start_date_is_valid(self):
+        """end_date == start_date (明示的同日指定) は有効"""
+        logic.set_temp_schedule(self._uid, "2099-06-01", "2099-06-01", [(0, 1, "")])
+        ts = logic.get_temp_schedule(self._uid)
+        self.assertIsNotNone(ts)
+        self.assertEqual(ts['end_date'], "2099-06-01")
+
+    def test_active_ids_includes_future_schedule(self):
+        """未来日付の臨時でも期限切れでなければ ID が返る"""
+        logic.set_temp_schedule(self._uid, "2099-01-01", "2099-12-31", [(0, 1, "")])
+        ids = logic.get_active_temp_schedule_user_ids()
+        self.assertIn(self._uid, ids)
+
+    def test_active_ids_excludes_expired_single_day(self):
+        """過去の1日のみ臨時は startup cleanup 後に返らない（init_db 呼び出し）"""
+        import sqlite3
+        conn = sqlite3.connect(self._path)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            "INSERT INTO m_user_temp_schedules (user_id, start_date, end_date) VALUES (?,?,?)",
+            (self._uid, "2000-01-01", None)
+        )
+        temp_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            "INSERT INTO m_user_temp_schedule_days (temp_id, day_of_week, bath_type, bath_memo) VALUES (?,?,?,?)",
+            (temp_id, 0, 1, "")
+        )
+        conn.commit()
+        conn.close()
+        logic.init_db()  # cleanup 実行
+        ids = logic.get_active_temp_schedule_user_ids()
+        self.assertNotIn(self._uid, ids)
+
+    def test_multiple_users_active_ids(self):
+        """複数ユーザーの臨時設定で全員返ること"""
+        uid2 = logic.add_user("二番目", "", "ニバンメ", "", 2)
+        logic.set_temp_schedule(self._uid, "2099-01-01", "2099-12-31", [(0, 1, "")])
+        logic.set_temp_schedule(uid2,      "2099-06-01", None,         [(3, 2, "")])
+        ids = logic.get_active_temp_schedule_user_ids()
+        self.assertIn(self._uid, ids)
+        self.assertIn(uid2, ids)
+
+    def test_whitespace_date_raises(self):
+        """空白の日付文字列はエラー"""
+        with self.assertRaises(ValueError):
+            logic.set_temp_schedule(self._uid, "   ", None, [(0, 1, "")])
+
+    def test_invalid_end_date_format_raises(self):
+        """終了日の不正フォーマットはエラー"""
+        with self.assertRaises(ValueError):
+            logic.set_temp_schedule(self._uid, "2099-04-01", "2099/04/07", [(0, 1, "")])
 
 
 if __name__ == "__main__":
