@@ -10,21 +10,30 @@ import config
 def create_and_show():
     """メイン画面を作成・表示"""
     
-    def refresh_user_list():
-        """ユーザーリストを更新"""
-        # TreeViewのクリア
+    def refresh_user_list(query=""):
+        """ユーザーリストを更新（queryで氏名・カナを絞り込み）"""
         for item in user_tree.get_children():
             user_tree.delete(item)
-        
-        # データベースからユーザーを取得して表示
+
         users = logic.get_users()
+        q = query.strip()
+        matched = 0
         for user in users:
             user_id, last_name, first_name, last_name_kana, first_name_kana, gender, is_long_term_absence = user
             full_name = f"{last_name}　{first_name}".strip()
             full_kana = f"{last_name_kana or ''}{first_name_kana or ''}".strip()
+            if q and q not in full_name and q not in full_kana:
+                continue
             gender_str = logic.GENDERS.get(gender, "不明")
             status = "長期休中" if is_long_term_absence else ""
             user_tree.insert('', 'end', values=(user_id, full_name, full_kana, gender_str, status))
+            matched += 1
+
+        total = len(users)
+        if q:
+            count_label.configure(text=f"{matched} / {total} 件")
+        else:
+            count_label.configure(text=f"{total} 件")
 
     def on_add_user_clicked():
         """ユーザー追加ボタン"""
@@ -51,7 +60,7 @@ def create_and_show():
         
         if messagebox.askyesno("確認", f"{name}を削除しますか？"):
             logic.delete_user(user_id)
-            refresh_user_list()
+            refresh_user_list(search_var.get())
             messagebox.showinfo("成功", f"{name}を削除しました")
 
     def on_db_setting_clicked():
@@ -77,7 +86,7 @@ def create_and_show():
             logic.init_db()
             db_path_label.configure(text=path)
             status_label.configure(text="DBファイルを変更しました", text_color="#2FA572")
-            refresh_user_list()
+            search_var.set("")
         except Exception as e:
             messagebox.showerror("エラー", f"DB変更に失敗しました:\n{str(e)}")
 
@@ -115,7 +124,7 @@ def create_and_show():
             logic.init_db()
             db_path_label.configure(text=path)
             status_label.configure(text="新規DBを作成しました", text_color="#2FA572")
-            refresh_user_list()
+            search_var.set("")
         except Exception as e:
             messagebox.showerror("エラー", f"DB作成に失敗しました:\n{str(e)}")
 
@@ -277,7 +286,7 @@ def create_and_show():
                         if day_idx in schedule_dict:
                             logic.delete_schedule_by_user_and_day(target_user_id, day_idx)
                 messagebox.showinfo("成功", "保存しました")
-                refresh_user_list()
+                refresh_user_list(search_var.get())
                 dialog.destroy()
             except Exception as e:
                 messagebox.showerror("エラー", f"処理に失敗しました: {str(e)}")
@@ -313,9 +322,26 @@ def create_and_show():
                   fg_color="#555555", hover_color="#333333",
                   command=on_new_db_clicked).grid(row=0, column=3, padx=(4, 10), pady=8)
 
+    # 検索バー
+    search_frame = ctk.CTkFrame(app, fg_color="transparent")
+    search_frame.pack(fill="x", padx=20, pady=(0, 4))
+
+    ctk.CTkLabel(search_frame, text="検索:", font=("", 12)).pack(side="left", padx=(0, 6))
+    search_var = tk.StringVar()
+    search_entry = ctk.CTkEntry(search_frame, textvariable=search_var, width=260,
+                                placeholder_text="氏名・カナで絞り込み", font=("", 12))
+    search_entry.pack(side="left")
+    ctk.CTkButton(search_frame, text="✕", width=32, height=28, font=("", 12),
+                  fg_color="#888888", hover_color="#666666",
+                  command=lambda: search_var.set("")).pack(side="left", padx=(6, 0))
+    count_label = ctk.CTkLabel(search_frame, text="", font=("", 11), text_color="gray")
+    count_label.pack(side="left", padx=(12, 0))
+
+    search_var.trace_add("write", lambda *_: refresh_user_list(search_var.get()))
+
     # TreeView（ユーザー一覧）
     tree_frame = ctk.CTkFrame(app)
-    tree_frame.pack(fill="both", expand=True, padx=20, pady=10)
+    tree_frame.pack(fill="both", expand=True, padx=20, pady=(0, 10))
 
     # ツリービューのスタイル設定
     style = ttk.Style()
@@ -365,6 +391,6 @@ def create_and_show():
     quit_btn.pack(pady=(0, 15))
 
     # 初期表示
-    refresh_user_list()
+    refresh_user_list(search_var.get())
 
     app.mainloop()
