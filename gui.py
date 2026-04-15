@@ -245,6 +245,21 @@ def create_and_show():
             if not any(is_attending_var.get() for is_attending_var, _, _ in day_entries.values()):
                 messagebox.showwarning("入力エラー", "来所日を1日以上選択してください")
                 return
+
+            # 重複チェック
+            exclude_id = user[0] if user else None
+            duplicates = logic.find_users_by_name(last_name, first_name, exclude_user_id=exclude_id)
+            if duplicates:
+                dup_info = "\n".join(
+                    f"  ・{r[1]} {r[2]}（{'男' if r[5] == 1 else '女'}）ID:{r[0]}"
+                    for r in duplicates
+                )
+                if not messagebox.askyesno(
+                    "重複確認",
+                    f"同じ氏名のユーザーが既に登録されています。\n\n{dup_info}\n\nこのまま登録しますか？"
+                ):
+                    return
+
             gender = gender_var.get()
             is_long_term_absence = 1 if absence_var.get() else 0
             try:

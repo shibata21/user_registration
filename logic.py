@@ -161,6 +161,27 @@ def delete_user(user_id):
     conn.close()
 
 
+def find_users_by_name(last_name, first_name, exclude_user_id=None):
+    """同じ氏名のユーザーを検索する（重複チェック用）"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    if exclude_user_id is not None:
+        cursor.execute('''
+        SELECT user_id, last_name, first_name, last_name_kana, first_name_kana, gender
+        FROM m_users
+        WHERE last_name = ? AND first_name = ? AND user_id != ?
+        ''', (last_name, first_name, exclude_user_id))
+    else:
+        cursor.execute('''
+        SELECT user_id, last_name, first_name, last_name_kana, first_name_kana, gender
+        FROM m_users
+        WHERE last_name = ? AND first_name = ?
+        ''', (last_name, first_name))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 def get_users():
     """全ユーザーを取得する"""
     conn = get_connection()

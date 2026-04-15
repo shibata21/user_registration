@@ -166,6 +166,69 @@ class TestAddUser(unittest.TestCase):
         self.assertGreater(uid, 0)
 
 
+class TestFindUsersByName(unittest.TestCase):
+
+    def setUp(self):
+        self._fd, self._path = tempfile.mkstemp(suffix=".db")
+        os.close(self._fd)
+        logic.set_db_path(self._path)
+        logic.init_db()
+
+    def tearDown(self):
+        logic.set_db_path(None)
+        os.unlink(self._path)
+
+    # ── 正常系 ──────────────────────────────────────────────
+
+    def test_no_duplicate_returns_empty(self):
+        logic.add_user("山田", "太郎", "ヤマダ", "タロウ", 1)
+        result = logic.find_users_by_name("鈴木", "花子")
+        self.assertEqual(result, [])
+
+    def test_finds_same_full_name(self):
+        uid = logic.add_user("山田", "太郎", "ヤマダ", "タロウ", 1)
+        result = logic.find_users_by_name("山田", "太郎")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][0], uid)
+
+    def test_finds_multiple_duplicates(self):
+        logic.add_user("山田", "太郎", "ヤマダ", "タロウ", 1)
+        logic.add_user("山田", "太郎", "ヤマダ", "タロウ", 2)
+        result = logic.find_users_by_name("山田", "太郎")
+        self.assertEqual(len(result), 2)
+
+    def test_excludes_self_on_update(self):
+        """編集時は自分自身を重複対象から除外する"""
+        uid = logic.add_user("山田", "太郎", "ヤマダ", "タロウ", 1)
+        result = logic.find_users_by_name("山田", "太郎", exclude_user_id=uid)
+        self.assertEqual(result, [])
+
+    def test_does_not_exclude_other_duplicates(self):
+        uid1 = logic.add_user("山田", "太郎", "ヤマダ", "タロウ", 1)
+        uid2 = logic.add_user("山田", "太郎", "ヤマダ", "タロウ", 2)
+        result = logic.find_users_by_name("山田", "太郎", exclude_user_id=uid1)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][0], uid2)
+
+    def test_partial_name_not_matched(self):
+        """氏だけが一致しても重複とみなさない"""
+        logic.add_user("山田", "太郎", "ヤマダ", "タロウ", 1)
+        result = logic.find_users_by_name("山田", "花子")
+        self.assertEqual(result, [])
+
+    def test_empty_first_name_matched(self):
+        """名が空の場合も正しく照合する"""
+        logic.add_user("山田", "", "ヤマダ", "", 1)
+        result = logic.find_users_by_name("山田", "")
+        self.assertEqual(len(result), 1)
+
+    # ── 異常系 ──────────────────────────────────────────────
+
+    def test_no_users_returns_empty(self):
+        result = logic.find_users_by_name("山田", "太郎")
+        self.assertEqual(result, [])
+
+
 class TestUpdateUser(unittest.TestCase):
 
     def setUp(self):
