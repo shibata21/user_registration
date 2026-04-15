@@ -172,7 +172,10 @@ def create_and_show():
             for r in records:
                 name = f"{r['last_name']}　{r['first_name']}".strip()
                 period = r['start_date'] + (" ～ " + r['end_date'] if r['end_date'] else "（1日のみ）")
-                days_str = "　".join(logic.WEEKDAY_NAMES[d] + "曜" for d in r['days'])
+                days_str = "　".join(
+                    logic.WEEKDAY_NAMES[d['day_of_week']] + "曜" + ("(休)" if d.get('is_absence') else "")
+                    for d in r['days']
+                )
                 tree.insert("", "end", values=(name, period, days_str))
 
         _load()
@@ -284,7 +287,10 @@ def create_and_show():
                 temp_info_label.configure(text="設定なし")
             else:
                 period = ts['start_date'] + (" ～ " + ts['end_date'] if ts['end_date'] else "（1日のみ）")
-                days_str = "　".join(logic.WEEKDAY_NAMES[d['day_of_week']] + "曜" for d in ts['days'])
+                days_str = "　".join(
+                    logic.WEEKDAY_NAMES[d['day_of_week']] + "曜" + ("(休)" if d.get('is_absence') else "")
+                    for d in ts['days']
+                )
                 temp_info_label.configure(text=f"{period}　/ {days_str}", text_color="orange")
 
         _refresh_temp_info()
@@ -332,23 +338,26 @@ def create_and_show():
                 ctk.CTkCheckBox(df, text=f"{day_name}曜日", variable=chk_var,
                                 width=90, font=("", 11)).pack(side="left", padx=(0, 8))
                 b_var = tk.StringVar()
-                b_combo = ttk.Combobox(df, textvariable=b_var, width=24, state="readonly", font=("", 11))
+                b_combo = ttk.Combobox(df, textvariable=b_var, width=20, state="readonly", font=("", 11))
                 b_combo['values'] = [f"{k}: {v}" for k, v in logic.BATH_TYPES.items()]
                 b_combo.set(f"{ex['bath_type']}: {logic.BATH_TYPES[ex['bath_type']]}" if ex else "0: 風呂なし")
                 b_combo.pack(side="left", padx=(0, 8))
-                m_entry = ctk.CTkEntry(df, placeholder_text="メモ", width=120, font=("", 11))
+                m_entry = ctk.CTkEntry(df, placeholder_text="メモ", width=90, font=("", 11))
                 if ex and ex['bath_memo']:
                     m_entry.insert(0, ex['bath_memo'])
-                m_entry.pack(side="left")
-                sub_day_entries[day_idx] = (chk_var, b_var, m_entry)
+                m_entry.pack(side="left", padx=(0, 8))
+                abs_var = tk.BooleanVar(value=bool(ex.get('is_absence', 0)) if ex else False)
+                ctk.CTkCheckBox(df, text="休み", variable=abs_var,
+                                width=60, font=("", 11)).pack(side="left")
+                sub_day_entries[day_idx] = (chk_var, b_var, m_entry, abs_var)
 
             def on_sub_save():
                 start = start_entry.get().strip()
                 end = end_entry.get().strip() or None
                 days = []
-                for di, (cv, bv, me) in sub_day_entries.items():
+                for di, (cv, bv, me, av) in sub_day_entries.items():
                     if cv.get():
-                        days.append((di, int(bv.get().split(':')[0]), me.get().strip()))
+                        days.append((di, int(bv.get().split(':')[0]), me.get().strip(), 1 if av.get() else 0))
                 try:
                     logic.set_temp_schedule(user[0], start, end, days)
                     _refresh_temp_info()

@@ -126,15 +126,24 @@ def init_db():
     # 臨時スケジュール 曜日明細テーブル
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS m_user_temp_schedule_days (
-        day_id     INTEGER PRIMARY KEY AUTOINCREMENT,
-        temp_id    INTEGER NOT NULL,
+        day_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+        temp_id     INTEGER NOT NULL,
         day_of_week INTEGER NOT NULL CHECK(day_of_week BETWEEN 0 AND 6),
-        bath_type  INTEGER NOT NULL DEFAULT 0,
-        bath_memo  TEXT DEFAULT '',
+        bath_type   INTEGER NOT NULL DEFAULT 0,
+        bath_memo   TEXT DEFAULT '',
+        is_absence  INTEGER NOT NULL DEFAULT 0,
         UNIQUE(temp_id, day_of_week),
         FOREIGN KEY (temp_id) REFERENCES m_user_temp_schedules(temp_id) ON DELETE CASCADE
     )
     ''')
+
+    # マイグレーション: m_user_temp_schedule_days に is_absence 追加
+    cursor.execute("PRAGMA table_info(m_user_temp_schedule_days)")
+    tmp_day_cols = [row[1] for row in cursor.fetchall()]
+    if 'is_absence' not in tmp_day_cols:
+        cursor.execute(
+            'ALTER TABLE m_user_temp_schedule_days ADD COLUMN is_absence INTEGER NOT NULL DEFAULT 0'
+        )
 
     conn.commit()
     conn.close()
@@ -363,11 +372,16 @@ def set_temp_schedule(user_id, start_date, end_date, days):
     VALUES (?, ?, ?)
     ''', (user_id, start_date, end_date or None))
     temp_id = cursor.lastrowid
-    for day_of_week, bath_type, bath_memo in days:
+    for item in days:
+        if len(item) == 4:
+            day_of_week, bath_type, bath_memo, is_absence = item
+        else:
+            day_of_week, bath_type, bath_memo = item
+            is_absence = 0
         cursor.execute('''
-        INSERT INTO m_user_temp_schedule_days (temp_id, day_of_week, bath_type, bath_memo)
-        VALUES (?, ?, ?, ?)
-        ''', (temp_id, day_of_week, bath_type, bath_memo or ''))
+        INSERT INTO m_user_temp_schedule_days (temp_id, day_of_week, bath_type, bath_memo, is_absence)
+        VALUES (?, ?, ?, ?, ?)
+        ''', (temp_id, day_of_week, bath_type, bath_memo or '', is_absence))
     conn.commit()
     conn.close()
 
@@ -389,11 +403,11 @@ def get_temp_schedule(user_id):
         return None
     temp_id = header[0]
     cursor.execute('''
-    SELECT day_of_week, bath_type, bath_memo
+    SELECT day_of_week, bath_type, bath_memo, is_absence
     FROM m_user_temp_schedule_days WHERE temp_id = ?
     ORDER BY day_of_week
     ''', (temp_id,))
-    days = [{'day_of_week': d[0], 'bath_type': d[1], 'bath_memo': d[2]}
+    days = [{'day_of_week': d[0], 'bath_type': d[1], 'bath_memo': d[2], 'is_absence': d[3]}
             for d in cursor.fetchall()]
     conn.close()
     return {'temp_id': header[0], 'user_id': header[1],
@@ -429,10 +443,10 @@ def get_all_active_temp_schedules():
     for row in rows:
         temp_id = row[0]
         cursor.execute('''
-        SELECT day_of_week FROM m_user_temp_schedule_days
+        SELECT day_of_week, is_absence FROM m_user_temp_schedule_days
         WHERE temp_id = ? ORDER BY day_of_week
         ''', (temp_id,))
-        days = [d[0] for d in cursor.fetchall()]
+        days = [{'day_of_week': d[0], 'is_absence': d[1]} for d in cursor.fetchall()]
         result.append({'temp_id': row[0], 'user_id': row[1],
                        'last_name': row[2], 'first_name': row[3],
                        'gender': row[4], 'start_date': row[5],

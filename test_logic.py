@@ -651,6 +651,21 @@ class TestTempSchedule(unittest.TestCase):
         with self.assertRaises(ValueError):
             logic.set_temp_schedule(self._uid, "2099-04-01", None, [])
 
+    def test_is_absence_stored_and_retrieved(self):
+        """is_absence フラグが保存・取得できること"""
+        logic.set_temp_schedule(self._uid, "2099-04-01", "2099-04-07",
+                                [(0, 2, "", 1), (1, 1, "", 0)])
+        ts = logic.get_temp_schedule(self._uid)
+        days = {d['day_of_week']: d for d in ts['days']}
+        self.assertEqual(days[0]['is_absence'], 1)
+        self.assertEqual(days[1]['is_absence'], 0)
+
+    def test_is_absence_defaults_to_zero(self):
+        """3要素タプルで登録した場合 is_absence は 0"""
+        logic.set_temp_schedule(self._uid, "2099-04-01", None, [(0, 2, "")])
+        ts = logic.get_temp_schedule(self._uid)
+        self.assertEqual(ts['days'][0]['is_absence'], 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
