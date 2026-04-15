@@ -456,19 +456,19 @@ def get_all_active_temp_schedules():
 
 
 def get_active_temp_schedule_user_ids():
-    """今日が適用期間内の臨時スケジュールを持つユーザーID集合を返す"""
+    """期限切れでない臨時スケジュールを持つユーザーID集合を返す
+    (cleanup_expired_temp_schedules と同じ条件の逆: end_date >= today or
+    single-day で start_date >= today)
+    """
     import datetime
     today = datetime.date.today().isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
     SELECT user_id FROM m_user_temp_schedules
-    WHERE start_date <= ?
-      AND (
-          (end_date IS NOT NULL AND end_date >= ?)
-          OR (end_date IS NULL AND start_date = ?)
-      )
-    ''', (today, today, today))
+    WHERE (end_date IS NOT NULL AND end_date >= ?)
+       OR (end_date IS NULL     AND start_date >= ?)
+    ''', (today, today))
     ids = {row[0] for row in cursor.fetchall()}
     conn.close()
     return ids
